@@ -1,4 +1,7 @@
-
+//Universidad del Valle de Guatemala 
+//Electrónica Digital 2 - BE3029
+//Julio Pérez 221023
+//Proyecto 2
 #include <Arduino.h>
 #include <ESP32SPISlave.h>
 #include "Wire.h"
