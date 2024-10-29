@@ -121,13 +121,6 @@ int main(void)
   while (1)
   {
       ShowMenu(); // Muestra el menú al usuario
-      // Leer opción seleccionada por el usuario
-      if (HAL_UART_Receive(&huart2, (uint8_t *)&menuOption, 1, HAL_MAX_DELAY) == HAL_OK)
-      {
-          HandleMenuSelection(); // Maneja la selección del menú
-          // Esperar a que el usuario presione Enter para volver a mostrar el menú
-          char dummy;
-          HAL_UART_Receive(&huart2, (uint8_t *)&dummy, 1, HAL_MAX_DELAY); // Limpiar el buffer
       }
     /* USER CODE END WHILE */
 
@@ -326,7 +319,84 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void ShowMenu()
+{
+    // Enviar mensaje de menú por UART
+    char menu[] = "\nSeleccione una opción:\n1. Obtener datos del ESP32\n2. Controlar LED\nIngrese su opción: ";
+    HAL_UART_Transmit(&huart2, (uint8_t*)menu, strlen(menu), HAL_MAX_DELAY);
 
+    // Leer opción del usuario
+    HAL_UART_Receive(&huart2, (uint8_t*)&menuOption, 1, HAL_MAX_DELAY);
+    HAL_UART_Transmit(&huart2, (uint8_t*)&menuOption, 1, HAL_MAX_DELAY); // Eco de opción
+    
+    // Manejar selección del menú
+    HandleMenuSelection();
+}
+
+
+void HandleMenuSelection()
+{
+    int led, tiempo;
+
+    switch(menuOption)
+    {
+        case '1':
+            GetI2CDataFromESP32(); // Llamar a la función para obtener datos I2C
+            break;
+        case '2':
+            // Obtener parámetros para controlar el LED
+            char command[] = "Ingrese el número del LED (1-3) y el tiempo (en ms): ";
+            HAL_UART_Transmit(&huart2, (uint8_t*)command, strlen(command), HAL_MAX_DELAY);
+            HAL_UART_Receive(&huart2, (uint8_t*)userCommand, sizeof(userCommand), HAL_MAX_DELAY);
+            sscanf(userCommand, "%d %d", &led, &tiempo); // Parsear el comando ingresado
+            SendCommandToESP32(led, tiempo); // Enviar comando al ESP32
+            break;
+        default:
+            char error[] = "Opción no válida. Intente de nuevo.\n";
+            HAL_UART_Transmit(&huart2, (uint8_t*)error, strlen(error), HAL_MAX_DELAY);
+            break;
+    }
+}
+
+
+void GetI2CDataFromESP32()
+{
+    // Leer datos I2C del ESP32
+    if (HAL_I2C_Master_Receive(&hi2c1, DeviceAddress << 1, RX_BUFFER, sizeof(RX_BUFFER), HAL_MAX_DELAY) != HAL_OK)
+    {
+        // Manejo de errores en la recepción
+        char error[] = "Error al recibir datos I2C.\n";
+        HAL_UART_Transmit(&huart2, (uint8_t*)error, strlen(error), HAL_MAX_DELAY);
+    }
+    else
+    {
+        // Transmitir datos recibidos
+        char msg[30];
+        sprintf(msg, "Datos recibidos: %02X %02X %02X %02X\n", RX_BUFFER[0], RX_BUFFER[1], RX_BUFFER[2], RX_BUFFER[3]);
+        HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+    }
+}
+
+
+void SendCommandToESP32(int led, int tiempo)
+{
+    // Enviar comando al ESP32 por I2C
+    TX_BUFFER[0] = led + '0'; // Convertir número a carácter
+    TX_BUFFER[1] = ' '; // Espacio
+    sprintf((char*)&TX_BUFFER[2], "%d", tiempo); // Agregar tiempo en formato de cadena
+
+    if (HAL_I2C_Master_Transmit(&hi2c1, DeviceAddress << 1, TX_BUFFER, sizeof(TX_BUFFER), HAL_MAX_DELAY) != HAL_OK)
+    {
+        // Manejo de errores en la transmisión
+        char error[] = "Error al enviar comando al ESP32.\n";
+        HAL_UART_Transmit(&huart2, (uint8_t*)error, strlen(error), HAL_MAX_DELAY);
+    }
+    else
+    {
+        char success[] = "Comando enviado con éxito.\n";
+        HAL_UART_Transmit(&huart2, (uint8_t*)success, strlen(success), HAL_MAX_DELAY);
+    }
+}
 /* USER CODE END 4 */
 
 /**
