@@ -1,88 +1,140 @@
+
 #include <Arduino.h>
 #include <ESP32SPISlave.h>
 #include "Wire.h"
 
-#define I2C_DEV_ADDR 0x55
-#define pot 34
+// Definiciones de dirección I2C y pines
+#define I2C_DEV_ADDR 0x55      // Dirección I2C del dispositivo
+#define pot 39                  // Pin analógico para el potenciómetro
+#define SPI_MISO 19             // Pin para MISO en SPI
+#define SPI_MOSI 23             // Pin para MOSI en SPI
+#define SPI_SCK 18              // Pin para SCK en SPI
+#define SPI_SS 5                // Pin para SS (Slave Select) en SPI
 
 // Arreglo de pines de los LEDs
-const int ledPins[] = {13, 12, 14}; // LED1 en pin 13, LED2 en pin 12, LED3 en pin 14
+const int ledPins[] = {12, 14, 27}; // Definición de pines para 3 LEDs
 
-#define QUEUE_SIZE 1
+#define QUEUE_SIZE 1            // Tamaño de la cola para transacciones SPI
 
-ESP32SPISlave slave;
+ESP32SPISlave slave;              // Inicialización del objeto esclavo SPI
 
 // Buffers para SPI
-static constexpr size_t BUFFER_SIZE = 12;
-uint8_t tx_buf[BUFFER_SIZE]{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
-uint8_t rx_buf[BUFFER_SIZE]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+static constexpr size_t BUFFER_SIZE = 12; // Tamaño del buffer
+uint8_t tx_buf[BUFFER_SIZE]{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}; // Buffer de transmisión
+uint8_t rx_buf[BUFFER_SIZE]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}; // Buffer de recepción
 
+// Prototipos de funciones
 void onRequest();
 void onReceive(int numBytes);
 void processCommand(const char* cmd);
 String bufferToStr(uint8_t*, int);
 
 void setup() {
-    pinMode(pot, INPUT);
+    pinMode(pot, INPUT); // Configura el pin del potenciómetro como entrada
     
-    // Configura los pines de los LEDs
+    // Configura los pines de los LEDs como salida
     for (int i = 0; i < 3; i++) {
         pinMode(ledPins[i], OUTPUT);
     }
 
-    Serial.begin(115200); // Para depuración
-    Serial.setDebugOutput(true);
+    Serial.begin(115200); // Inicializa la comunicación serie para depuración
+    Serial.setDebugOutput(true); // Habilita la salida de depuración
 
     // Inicializa I2C
-    Wire.begin((uint8_t)I2C_DEV_ADDR);
-    Wire.onRequest(onRequest);
-    Wire.onReceive(onReceive); // Registra la función onReceive
+    Wire.begin((uint8_t)I2C_DEV_ADDR); // Comienza el bus I2C con la dirección definida
+    Wire.onRequest(onRequest); // Registra la función para solicitudes I2C
+    Wire.onReceive(onReceive); // Registra la función para recibir datos I2C
 
     // Inicializa SPI
-    slave.setDataMode(SPI_MODE0);
-    slave.setQueueSize(QUEUE_SIZE);
-    slave.begin(VSPI);
+    slave.setDataMode(SPI_MODE0); // Configura el modo de datos SPI
+    slave.setQueueSize(QUEUE_SIZE); // Establece el tamaño de la cola
+    slave.begin(VSPI, SPI_SCK, SPI_MISO, SPI_MOSI, SPI_SS); // Inicia el esclavo SPI
 
-    delay(2000);
+    delay(2000); // Espera para estabilizar la conexión
     Serial.println("Inicio del SPI esclavo");
 }
 
 void loop() {
+    // Comprueba si se han completado transacciones SPI
     if (slave.hasTransactionsCompletedAndAllResultsHandled()) {
-        slave.queue(NULL, rx_buf, BUFFER_SIZE);
-        delay(5);
-        slave.trigger();
+        slave.queue(NULL, rx_buf, BUFFER_SIZE); // Prepara el buffer de recepción
+        delay(5); // Espera un breve momento
+        slave.trigger(); // Activa la transacción
         Serial.println("Transacción activada, esperando datos...");
     }
 
+    // Comprueba si hay datos listos para procesar
     if (slave.hasTransactionsCompletedAndAllResultsReady(QUEUE_SIZE)) {
-        const std::vector<size_t> received_bytes = slave.numBytesReceivedAll();
+        const std::vector<size_t> received_bytes = slave.numBytesReceivedAll(); // Obtiene el número de bytes recibidos
         if (received_bytes[0] > 0) {
-            String command = bufferToStr(rx_buf, received_bytes[0]);
+            String command = bufferToStr(rx_buf, received_bytes[0]); // Convierte el buffer a String
             Serial.print("Datos recibidos: ");
-            Serial.println(command);
-            processCommand(command.c_str());
+            Serial.println(command); // Muestra los datos recibidos
+            processCommand(command.c_str()); // Procesa el comando recibido
             Serial.println("Comando procesado");
         }
     }
 }
 
 void onRequest() {
-
+    int potValue = analogRead(pot); // Lee el valor del potenciómetro
+    potValue = map(potValue, 0, 4095, 0, 255); // Mapea el valor a un rango de 0 a 255
+    Wire.write(potValue); // Envía el valor mapeado por I2C
+    Serial.print("Valor del potenciómetro enviado: ");
+    Serial.println(potValue); // Para depuración
 }
 
 void onReceive(int numBytes) {
-
+    Serial.print("Datos recibidos por I2C: ");
+    while (Wire.available()) {
+        char c = Wire.read(); // Lee un byte de datos
+        Serial.print(c); // Imprime el byte recibido
+    }
+    Serial.println();
 }
 
 void processCommand(const char* cmd) {
+    int led; // Variable para el LED a controlar
+    int time; // Variable para el tiempo de encendido
 
+    Serial.print("Comando a procesar: ");
+    Serial.println(cmd); // Muestra el comando recibido
+
+    if (strlen(cmd) >= 4) {
+        led = cmd[0] - '0'; // Extrae el número del LED
+        time = atoi(cmd + 1); // Extrae el tiempo de encendido
+
+        Serial.print("LED: ");
+        Serial.println(led);
+        Serial.print("Tiempo: ");
+        Serial.println(time);
+
+        // Verifica que el LED esté en el rango válido
+        if (led >= 1 && led <= 3) {
+            digitalWrite(ledPins[led - 1], HIGH); // Enciende el LED correspondiente
+            Serial.print("Encendiendo LED ");
+            Serial.print(led);
+            Serial.print(" por ");
+            Serial.print(time);
+            Serial.println(" ms");
+
+            delay(time); // Mantiene el LED encendido el tiempo especificado
+            digitalWrite(ledPins[led - 1], LOW); // Apaga el LED
+            Serial.print("LED ");
+            Serial.print(led);
+            Serial.println(" apagado");
+        } else {
+            Serial.println("Comando inválido: LED fuera de rango"); // Mensaje de error
+        }
+    } else {
+        Serial.println("Comando inválido: formato incorrecto"); 
+    }
 }
 
 String bufferToStr(uint8_t* buffer, int bufferSize) {
     String result = "";
     for (int i = 0; i < bufferSize; i++) {
-        result += (char)buffer[i]; // Convierte cada byte a char
+        result += (char)buffer[i]; // Convierte cada byte a char y lo añade al String
     }
-    return result;
+    return result; // Devuelve el String resultante
 }
